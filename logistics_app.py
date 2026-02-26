@@ -33,7 +33,6 @@ def load_data():
         "Purpose", "Location", "Items", "Photo"
     ])
 
-# Define df here so it is ALWAYS available to the ledger
 df = load_data()
 
 def save_to_github(dataframe):
@@ -45,7 +44,7 @@ def save_to_github(dataframe):
         repo.update_file(contents.path, f"Logistics Sync {datetime.now(IST)}", csv_content, contents.sha)
         return True
     except Exception as e:
-        st.error(f"GitHub Error: {e}")
+        st.error(f"GitHub Sync Error: {e}")
         return False
 
 # --- 3. INPUT FORM ---
@@ -97,7 +96,7 @@ with st.form("logistics_form", clear_on_submit=True):
             updated_df.to_csv(DB_FILE, index=False)
             
             if save_to_github(updated_df):
-                st.cache_data.clear() # Clears cache so next load gets new data
+                st.cache_data.clear() 
                 st.success(f"✅ Logged {trip_distance}km trip by {driver}")
                 st.rerun()
 
@@ -133,15 +132,5 @@ if not df.empty:
         grid_html += f"</tr>"
     grid_html += "</table></div>"
     components.html(grid_html, height=400, scrolling=True)
-
-    st.write("---")
-    st.subheader("🔍 View Bill / Challan Photo")
-    photo_df = df[df["Photo"].astype(str).str.len() > 50].copy()
-    if not photo_df.empty:
-        photo_df = photo_df.sort_values(by="Timestamp", ascending=False)
-        options = {i: f"{r['Timestamp']} | {r['Vehicle']} | {r['Location']}" for i, r in photo_df.iterrows()}
-        selection = st.selectbox("Select record:", options.keys(), format_func=lambda x: options[x])
-        if selection is not None:
-            st.image(base64.b64decode(photo_df.loc[selection, "Photo"]), use_container_width=True)
 else:
     st.info("No movement logs found yet.")
