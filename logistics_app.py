@@ -26,7 +26,12 @@ st.set_page_config(page_title="B&G Logistics", layout="wide")
 def load_data():
     if os.path.exists(DB_FILE):
         return pd.read_csv(DB_FILE)
-    return pd.DataFrame(columns=["Timestamp", "Vehicle", "Purpose", "Item_Details", "Location", "Photo"])
+    # UPDATED: All column headers must be defined here for the first run
+    return pd.DataFrame(columns=[
+        "Timestamp", "Vehicle", "Driver", "Authorized_By", 
+        "Start_KM", "End_KM", "Distance", "Fuel_Ltrs", 
+        "Purpose", "Location", "Items", "Photo"
+    ])
 
 def save_to_github(dataframe):
     try:
@@ -40,8 +45,7 @@ def save_to_github(dataframe):
 
 df = load_data()
 
-# --- 3. INPUT FORM (Updated with B&G Drivers & Authorization) ---
-# --- 3. INPUT FORM (With KM Tracking & Fuel) ---
+# --- 3. INPUT FORM ---
 with st.form("logistics_form", clear_on_submit=True):
     st.subheader("📝 Log Vehicle Movement & Fuel")
     col1, col2, col3 = st.columns(3)
@@ -69,7 +73,6 @@ with st.form("logistics_form", clear_on_submit=True):
         elif not auth_by or not location:
             st.error("❌ Please fill in Authorization and Location.")
         else:
-            # Image Compression
             img_str = ""
             if cam_photo:
                 img = Image.open(cam_photo)
@@ -77,30 +80,35 @@ with st.form("logistics_form", clear_on_submit=True):
                 img.save(buf, format="JPEG", quality=50) 
                 img_str = base64.b64encode(buf.getvalue()).decode()
             
-            # Calculate Trip Distance
             trip_distance = end_km - start_km if end_km > 0 else 0
 
             new_log = pd.DataFrame([{
                 "Timestamp": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
-                "Vehicle": vehicle, "Driver": driver, "Authorized_By": auth_by.upper(),
-                "Start_KM": start_km, "End_KM": end_km, "Distance": trip_distance,
-                "Fuel_Ltrs": fuel_qty, "Purpose": purpose, "Location": location.upper(), 
-                "Items": items.upper(), "Photo": img_str
+                "Vehicle": vehicle, 
+                "Driver": driver, 
+                "Authorized_By": auth_by.upper(),
+                "Start_KM": start_km, 
+                "End_KM": end_km, 
+                "Distance": trip_distance,
+                "Fuel_Ltrs": fuel_qty, 
+                "Purpose": purpose, 
+                "Location": location.upper(), 
+                "Items": items.upper(), # SAVED AS "Items"
+                "Photo": img_str
             }])
             
-            # Save Logic
             updated_df = pd.concat([df, new_log], ignore_index=True)
             updated_df.to_csv(DB_FILE, index=False)
             if save_to_github(updated_df):
                 st.success(f"✅ Logged {trip_distance}km trip by {driver}")
                 st.rerun()
+
 # --- 4. THE PROFESSIONAL LEDGER GRID ---
 st.divider()
 if not df.empty:
     st.subheader("📜 Recent Movement History")
     view_df = df.sort_values(by="Timestamp", ascending=False).head(15)
     
-    # Grid CSS
     grid_html = """
     <div style="overflow-x: auto; border: 1px solid #000;">
         <table style="width:100%; border-collapse: collapse; min-width: 850px; font-family: sans-serif;">
@@ -109,18 +117,23 @@ if not df.empty:
                 <th style="border:1px solid #000; padding:10px;">Vehicle</th>
                 <th style="border:1px solid #000; padding:10px;">Purpose</th>
                 <th style="border:1px solid #000; padding:8px;">Location</th>
+                <th style="border:1px solid #000; padding:8px;">Distance</th>
                 <th style="border:1px solid #000; padding:8px;">Items</th>
                 <th style="border:1px solid #000; padding:10px;">Photo</th>
             </tr>
     """
     for _, r in view_df.iterrows():
         p_stat = "✅ Yes" if len(str(r['Photo'])) > 50 else "❌ No"
-        grid_html += f"<tr><td style='border:1px solid #000; padding:8px;'>{r['Timestamp']}</td>"
+        grid_html += f"<tr>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Timestamp']}</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'><b>{r['Vehicle']}</b></td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Purpose']}</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Location']}</td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Item_Details']}</td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{p_stat}</td></tr>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Distance', 0)} KM</td>"
+        # FIXED: Changed from r['Item_Details'] to r['Items']
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Items']}</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{p_stat}</td>"
+        grid_html += f"</tr>"
     grid_html += "</table></div>"
     components.html(grid_html, height=400, scrolling=True)
 
