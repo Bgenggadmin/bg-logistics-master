@@ -41,61 +41,59 @@ def save_to_github(dataframe):
 df = load_data()
 
 # --- 3. INPUT FORM (Updated with B&G Drivers & Authorization) ---
-st.title("🚛 B&G Logistics & Inter-Unit Tracker")
-
+# --- 3. INPUT FORM (With KM Tracking & Fuel) ---
 with st.form("logistics_form", clear_on_submit=True):
-    st.subheader("📝 Log Vehicle Movement")
-    col1, col2 = st.columns(2)
+    st.subheader("📝 Log Vehicle Movement & Fuel")
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        vehicle = st.selectbox("Select Vehicle", ["Ashok Leyland", "Mahindra"])
-        # Updated Driver Selection
-        driver = st.selectbox("Driver Name", ["Driver", "Brahmiah", "Other"])
-        purpose = st.selectbox("Purpose", [
-            "Inter-Unit Transfer (500m)", 
-            "Consumable Pickup (Vendor)", 
-            "Machining Item Pickup", 
-            "MEE Site Delivery",
-            "Fueling / Service"
-        ])
-    
-    with col2:
-        # New Authorization Field
-        authorized_by = st.text_input("Authorized By (Who requested?)", placeholder="e.g. Subodth / RamaSai")
-        location = st.text_input("Destination / Vendor Name", placeholder="e.g. Unit 2, MEE Site")
-        items = st.text_area("Item Details", placeholder="e.g. 5kg Electrodes, SSR501 Shell")
+        vehicle = st.selectbox("Vehicle", ["Ashok Leyland", "Mahindra"])
+        driver = st.selectbox("Driver Name", ["Brahmiah", "Driver", "Other"])
+        purpose = st.selectbox("Purpose", ["Inter-Unit (500m)", "Pickup", "Site Delivery", "Fueling"])
 
-    cam_photo = st.camera_input("Capture Challan / Bill / Loading Photo")
+    with col2:
+        start_km = st.number_input("Start KM Reading", min_value=0, step=1)
+        end_km = st.number_input("End KM Reading", min_value=0, step=1)
+        fuel_qty = st.number_input("Fuel Added (Litres)", min_value=0.0, step=0.1)
+
+    with col3:
+        auth_by = st.text_input("Authorized By", placeholder="e.g. Subodth")
+        location = st.text_input("Location", placeholder="e.g. Unit 2 / Shop Name")
+
+    items = st.text_area("Item Details / Remarks")
+    cam_photo = st.camera_input("Capture Bill / Odometer / Loading")
 
     if st.form_submit_button("🚀 SUBMIT LOG"):
-        if not items or not location or not authorized_by:
-            st.error("❌ Please fill in Items, Location, and Authorization.")
+        if end_km < start_km and end_km != 0:
+            st.error("❌ End KM cannot be less than Start KM!")
+        elif not auth_by or not location:
+            st.error("❌ Please fill in Authorization and Location.")
         else:
+            # Image Compression
             img_str = ""
             if cam_photo:
                 img = Image.open(cam_photo)
-                buffered = BytesIO()
-                img.save(buffered, format="JPEG", quality=50) # Compression for space
-                img_str = base64.b64encode(buffered.getvalue()).decode()
+                buf = BytesIO()
+                img.save(buf, format="JPEG", quality=50) 
+                img_str = base64.b64encode(buf.getvalue()).decode()
             
-            # UPDATED DATAFRAME COLUMNS
+            # Calculate Trip Distance
+            trip_distance = end_km - start_km if end_km > 0 else 0
+
             new_log = pd.DataFrame([{
                 "Timestamp": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
-                "Vehicle": vehicle, 
-                "Driver": driver,
-                "Authorized_By": authorized_by.upper(),
-                "Purpose": purpose,
-                "Item_Details": items.upper(), 
-                "Location": location.upper(), 
-                "Photo": img_str
+                "Vehicle": vehicle, "Driver": driver, "Authorized_By": auth_by.upper(),
+                "Start_KM": start_km, "End_KM": end_km, "Distance": trip_distance,
+                "Fuel_Ltrs": fuel_qty, "Purpose": purpose, "Location": location.upper(), 
+                "Items": items.upper(), "Photo": img_str
             }])
             
+            # Save Logic
             updated_df = pd.concat([df, new_log], ignore_index=True)
             updated_df.to_csv(DB_FILE, index=False)
             if save_to_github(updated_df):
-                st.success(f"✅ Logged: {vehicle} requested by {authorized_by}")
+                st.success(f"✅ Logged {trip_distance}km trip by {driver}")
                 st.rerun()
-
 # --- 4. THE PROFESSIONAL LEDGER GRID ---
 st.divider()
 if not df.empty:
