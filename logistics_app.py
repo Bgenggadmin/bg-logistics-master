@@ -47,7 +47,7 @@ def save_to_github(dataframe):
         st.error(f"GitHub Sync Error: {e}")
         return False
 
-# --- 3. INPUT FORM ---
+# --- 3. INPUT FORM (Restored Missing Fields) ---
 with st.form("logistics_form", clear_on_submit=True):
     st.subheader("📝 Log Vehicle Movement & Fuel")
     col1, col2, col3 = st.columns(3)
@@ -67,7 +67,7 @@ with st.form("logistics_form", clear_on_submit=True):
         location = st.text_input("Location", placeholder="e.g. Unit 2 / Shop Name")
 
     items = st.text_area("Item Details / Remarks")
-    cam_photo = st.camera_input("Capture Bill / Odometer / Loading")
+    cam_photo = st.camera_input("Capture Bill / Odometer / Loading Photo")
 
     if st.form_submit_button("🚀 SUBMIT LOG"):
         if end_km < start_km and end_km != 0:
@@ -108,12 +108,13 @@ if not df.empty:
     
     grid_html = """
     <div style="overflow-x: auto; border: 1px solid #000;">
-        <table style="width:100%; border-collapse: collapse; min-width: 850px; font-family: sans-serif;">
+        <table style="width:100%; border-collapse: collapse; min-width: 1000px; font-family: sans-serif;">
             <tr style="background-color: #f2f2f2;">
                 <th style="border:1px solid #000; padding:10px;">Time (IST)</th>
                 <th style="border:1px solid #000; padding:10px;">Vehicle</th>
-                <th style="border:1px solid #000; padding:10px;">Purpose</th>
-                <th style="border:1px solid #000; padding:8px;">Location</th>
+                <th style="border:1px solid #000; padding:10px;">Driver</th>
+                <th style="border:1px solid #000; padding:10px;">Authorized By</th>
+                <th style="border:1px solid #000; padding:8px;">Fuel (L)</th>
                 <th style="border:1px solid #000; padding:8px;">Distance</th>
                 <th style="border:1px solid #000; padding:8px;">Items</th>
                 <th style="border:1px solid #000; padding:10px;">Photo</th>
@@ -124,13 +125,14 @@ if not df.empty:
         grid_html += f"<tr>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Timestamp']}</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'><b>{r['Vehicle']}</b></td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Purpose']}</td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Location']}</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Driver', 'N/A')}</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Authorized_By', 'N/A')}</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Fuel_Ltrs', 0)} L</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Distance', 0)} KM</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Items', '')}</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{p_stat}</td>"
         grid_html += f"</tr>"
     grid_html += "</table></div>"
-    components.html(grid_html, height=400, scrolling=True)
+    components.html(grid_html, height=450, scrolling=True)
 else:
     st.info("No movement logs found yet.")
