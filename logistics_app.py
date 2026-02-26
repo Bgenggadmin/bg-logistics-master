@@ -13,6 +13,8 @@ import streamlit.components.v1 as components
 IST = pytz.timezone('Asia/Kolkata')
 DB_FILE = "logistics_logs.csv"
 
+st.set_page_config(page_title="B&G Logistics", layout="wide")
+
 try:
     REPO_NAME = st.secrets["GITHUB_REPO"]
     TOKEN = st.secrets["GITHUB_TOKEN"]
@@ -20,13 +22,10 @@ except:
     st.error("❌ Secrets missing in Streamlit Cloud!")
     st.stop()
 
-st.set_page_config(page_title="B&G Logistics", layout="wide")
-
-# --- 2. DATA UTILITIES (Fixed for Instant Refresh) ---
+# --- 2. DATA UTILITIES ---
 @st.cache_data(ttl=1) 
 def load_data():
     if os.path.exists(DB_FILE):
-        # We read the file normally; ttl=1 handles the refresh
         return pd.read_csv(DB_FILE)
     return pd.DataFrame(columns=[
         "Timestamp", "Vehicle", "Driver", "Authorized_By", 
@@ -34,13 +33,20 @@ def load_data():
         "Purpose", "Location", "Items", "Photo"
     ])
 
-# Define df at the top level
+# Define df here so it is ALWAYS available to the ledger
 df = load_data()
 
-# Sidebar Refresh for manual override
-if st.sidebar.button("🔄 Force Refresh History"):
-    st.cache_data.clear()
-    st.rerun()
+def save_to_github(dataframe):
+    try:
+        g = Github(TOKEN)
+        repo = g.get_repo(REPO_NAME)
+        csv_content = dataframe.to_csv(index=False)
+        contents = repo.get_contents(DB_FILE)
+        repo.update_file(contents.path, f"Logistics Sync {datetime.now(IST)}", csv_content, contents.sha)
+        return True
+    except Exception as e:
+        st.error(f"GitHub Error: {e}")
+        return False
 
 # --- 3. INPUT FORM ---
 with st.form("logistics_form", clear_on_submit=True):
@@ -64,18 +70,6 @@ with st.form("logistics_form", clear_on_submit=True):
     items = st.text_area("Item Details / Remarks")
     cam_photo = st.camera_input("Capture Bill / Odometer / Loading")
 
-    def save_to_github(dataframe):
-        try:
-            g = Github(TOKEN)
-            repo = g.get_repo(REPO_NAME)
-            csv_content = dataframe.to_csv(index=False)
-            contents = repo.get_contents(DB_FILE)
-            repo.update_file(contents.path, f"Logistics Sync {datetime.now(IST)}", csv_content, contents.sha)
-            return True
-        except Exception as e:
-            st.error(f"GitHub Error: {e}")
-            return False
-
     if st.form_submit_button("🚀 SUBMIT LOG"):
         if end_km < start_km and end_km != 0:
             st.error("❌ End KM cannot be less than Start KM!")
@@ -93,24 +87,17 @@ with st.form("logistics_form", clear_on_submit=True):
 
             new_log = pd.DataFrame([{
                 "Timestamp": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
-                "Vehicle": vehicle, 
-                "Driver": driver, 
-                "Authorized_By": auth_by.upper(),
-                "Start_KM": start_km, 
-                "End_KM": end_km, 
-                "Distance": trip_distance,
-                "Fuel_Ltrs": fuel_qty, 
-                "Purpose": purpose, 
-                "Location": location.upper(), 
-                "Items": items.upper(),
-                "Photo": img_str
+                "Vehicle": vehicle, "Driver": driver, "Authorized_By": auth_by.upper(),
+                "Start_KM": start_km, "End_KM": end_km, "Distance": trip_distance,
+                "Fuel_Ltrs": fuel_qty, "Purpose": purpose, "Location": location.upper(), 
+                "Items": items.upper(), "Photo": img_str
             }])
             
             updated_df = pd.concat([df, new_log], ignore_index=True)
             updated_df.to_csv(DB_FILE, index=False)
             
             if save_to_github(updated_df):
-                st.cache_data.clear() # CLEAR CACHE BEFORE RERUN
+                st.cache_data.clear() # Clears cache so next load gets new data
                 st.success(f"✅ Logged {trip_distance}km trip by {driver}")
                 st.rerun()
 
@@ -118,7 +105,6 @@ with st.form("logistics_form", clear_on_submit=True):
 st.divider()
 if not df.empty:
     st.subheader("📜 Recent Movement History")
-    # Sort and take top 15
     view_df = df.sort_values(by="Timestamp", ascending=False).head(15)
     
     grid_html = """
@@ -148,15 +134,13 @@ if not df.empty:
     grid_html += "</table></div>"
     components.html(grid_html, height=400, scrolling=True)
 
-    # --- 5. PHOTO SELECTION VIEWER ---
     st.write("---")
     st.subheader("🔍 View Bill / Challan Photo")
-    # Filter for rows that actually have photos
     photo_df = df[df["Photo"].astype(str).str.len() > 50].copy()
     if not photo_df.empty:
         photo_df = photo_df.sort_values(by="Timestamp", ascending=False)
         options = {i: f"{r['Timestamp']} | {r['Vehicle']} | {r['Location']}" for i, r in photo_df.iterrows()}
-        selection = st.selectbox("Select a record to view photo:", options.keys(), format_func=lambda x: options[x])
+        selection = st.selectbox("Select record:", options.keys(), format_func=lambda x: options[x])
         if selection is not None:
             st.image(base64.b64decode(photo_df.loc[selection, "Photo"]), use_container_width=True)
 else:
