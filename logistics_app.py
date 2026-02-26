@@ -40,7 +40,7 @@ def save_to_github(dataframe):
 
 df = load_data()
 
-# --- 3. INPUT FORM ---
+# --- 3. INPUT FORM (Updated with B&G Drivers & Authorization) ---
 st.title("🚛 B&G Logistics & Inter-Unit Tracker")
 
 with st.form("logistics_form", clear_on_submit=True):
@@ -49,6 +49,8 @@ with st.form("logistics_form", clear_on_submit=True):
     
     with col1:
         vehicle = st.selectbox("Select Vehicle", ["Ashok Leyland", "Mahindra"])
+        # Updated Driver Selection
+        driver = st.selectbox("Driver Name", ["Driver", "Brahmiah", "Other"])
         purpose = st.selectbox("Purpose", [
             "Inter-Unit Transfer (500m)", 
             "Consumable Pickup (Vendor)", 
@@ -58,14 +60,16 @@ with st.form("logistics_form", clear_on_submit=True):
         ])
     
     with col2:
-        location = st.text_input("Destination / Vendor Name (e.g. Unit 2, MEE Site, Shop Name)")
-        items = st.text_area("Item Details (e.g. 5kg Electrodes, SSR501 Shell, Grinding Wheels)")
+        # New Authorization Field
+        authorized_by = st.text_input("Authorized By (Who requested?)", placeholder="e.g. Subodth / RamaSai")
+        location = st.text_input("Destination / Vendor Name", placeholder="e.g. Unit 2, MEE Site")
+        items = st.text_area("Item Details", placeholder="e.g. 5kg Electrodes, SSR501 Shell")
 
     cam_photo = st.camera_input("Capture Challan / Bill / Loading Photo")
 
     if st.form_submit_button("🚀 SUBMIT LOG"):
-        if not items or not location:
-            st.error("❌ Please enter Item Details and Location.")
+        if not items or not location or not authorized_by:
+            st.error("❌ Please fill in Items, Location, and Authorization.")
         else:
             img_str = ""
             if cam_photo:
@@ -74,17 +78,22 @@ with st.form("logistics_form", clear_on_submit=True):
                 img.save(buffered, format="JPEG", quality=50) # Compression for space
                 img_str = base64.b64encode(buffered.getvalue()).decode()
             
+            # UPDATED DATAFRAME COLUMNS
             new_log = pd.DataFrame([{
                 "Timestamp": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
-                "Vehicle": vehicle, "Purpose": purpose,
-                "Item_Details": items.upper(), "Location": location.upper(), 
+                "Vehicle": vehicle, 
+                "Driver": driver,
+                "Authorized_By": authorized_by.upper(),
+                "Purpose": purpose,
+                "Item_Details": items.upper(), 
+                "Location": location.upper(), 
                 "Photo": img_str
             }])
             
             updated_df = pd.concat([df, new_log], ignore_index=True)
             updated_df.to_csv(DB_FILE, index=False)
             if save_to_github(updated_df):
-                st.success(f"✅ Logged: {vehicle} moving {purpose}")
+                st.success(f"✅ Logged: {vehicle} requested by {authorized_by}")
                 st.rerun()
 
 # --- 4. THE PROFESSIONAL LEDGER GRID ---
