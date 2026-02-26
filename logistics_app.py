@@ -22,28 +22,22 @@ except:
 
 st.set_page_config(page_title="B&G Logistics", layout="wide")
 
-# --- 2. DATA UTILITIES ---
+# --- 2. DATA UTILITIES (Updated to prevent Cache Lag) ---
+@st.cache_data(ttl=1) # This tells Streamlit to only remember data for 1 second
 def load_data():
     if os.path.exists(DB_FILE):
-        return pd.read_csv(DB_FILE)
-    # UPDATED: All column headers must be defined here for the first run
+        # We add 'storage_options' or simply read fresh
+        return pd.read_csv(DB_FILE, timestamp=datetime.now().timestamp())
     return pd.DataFrame(columns=[
         "Timestamp", "Vehicle", "Driver", "Authorized_By", 
         "Start_KM", "End_KM", "Distance", "Fuel_Ltrs", 
         "Purpose", "Location", "Items", "Photo"
     ])
 
-def save_to_github(dataframe):
-    try:
-        g = Github(TOKEN)
-        repo = g.get_repo(REPO_NAME)
-        csv_content = dataframe.to_csv(index=False)
-        contents = repo.get_contents(DB_FILE)
-        repo.update_file(contents.path, f"Logistics Sync {datetime.now(IST)}", csv_content, contents.sha)
-        return True
-    except: return False
-
-df = load_data()
+# At the very top of your script, under 'df = load_data()', add this:
+if st.sidebar.button("🔄 Refresh Data"):
+    st.cache_data.clear()
+    st.rerun()
 
 # --- 3. INPUT FORM ---
 with st.form("logistics_form", clear_on_submit=True):
