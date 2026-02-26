@@ -35,6 +35,11 @@ def load_data():
 
 df = load_data()
 
+# Sidebar Refresh
+if st.sidebar.button("🔄 Refresh Data"):
+    st.cache_data.clear()
+    st.rerun()
+
 def save_to_github(dataframe):
     try:
         g = Github(TOKEN)
@@ -47,7 +52,7 @@ def save_to_github(dataframe):
         st.error(f"GitHub Sync Error: {e}")
         return False
 
-# --- 3. INPUT FORM (Restored Missing Fields) ---
+# --- 3. INPUT FORM ---
 with st.form("logistics_form", clear_on_submit=True):
     st.subheader("📝 Log Vehicle Movement & Fuel")
     col1, col2, col3 = st.columns(3)
@@ -134,5 +139,29 @@ if not df.empty:
         grid_html += f"</tr>"
     grid_html += "</table></div>"
     components.html(grid_html, height=450, scrolling=True)
+
+    # --- 5. PHOTO SELECTION VIEWER (ADDED BACK) ---
+    st.write("---")
+    st.subheader("🔍 View Bill / Challan Photo")
+    # Filter rows that have a valid base64 image string
+    photo_df = df[df["Photo"].astype(str).str.len() > 50].copy()
+    
+    if not photo_df.empty:
+        photo_df = photo_df.sort_values(by="Timestamp", ascending=False)
+        # Create a clean label for the dropdown
+        options = {i: f"{r['Timestamp']} | {r['Vehicle']} | {r['Driver']}" for i, r in photo_df.iterrows()}
+        
+        selection = st.selectbox("Select a trip to view its photo:", 
+                                 options.keys(), 
+                                 format_func=lambda x: options[x])
+        
+        if selection is not None:
+            try:
+                img_data = base64.b64decode(photo_df.loc[selection, "Photo"])
+                st.image(img_data, caption=f"Photo for trip on {photo_df.loc[selection, 'Timestamp']}", use_container_width=True)
+            except Exception as e:
+                st.error("Could not load image.")
+    else:
+        st.info("No photos uploaded yet.")
 else:
     st.info("No movement logs found yet.")
