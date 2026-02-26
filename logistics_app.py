@@ -22,20 +22,23 @@ except:
 
 st.set_page_config(page_title="B&G Logistics", layout="wide")
 
-# --- 2. DATA UTILITIES (Updated to prevent Cache Lag) ---
-@st.cache_data(ttl=1) # This tells Streamlit to only remember data for 1 second
+# --- 2. DATA UTILITIES (Fixed for Instant Refresh) ---
+@st.cache_data(ttl=1) 
 def load_data():
     if os.path.exists(DB_FILE):
-        # We add 'storage_options' or simply read fresh
-        return pd.read_csv(DB_FILE, timestamp=datetime.now().timestamp())
+        # We read the file normally; ttl=1 handles the refresh
+        return pd.read_csv(DB_FILE)
     return pd.DataFrame(columns=[
         "Timestamp", "Vehicle", "Driver", "Authorized_By", 
         "Start_KM", "End_KM", "Distance", "Fuel_Ltrs", 
         "Purpose", "Location", "Items", "Photo"
     ])
 
-# At the very top of your script, under 'df = load_data()', add this:
-if st.sidebar.button("🔄 Refresh Data"):
+# Define df at the top level
+df = load_data()
+
+# Sidebar Refresh for manual override
+if st.sidebar.button("🔄 Force Refresh History"):
     st.cache_data.clear()
     st.rerun()
 
@@ -60,6 +63,18 @@ with st.form("logistics_form", clear_on_submit=True):
 
     items = st.text_area("Item Details / Remarks")
     cam_photo = st.camera_input("Capture Bill / Odometer / Loading")
+
+    def save_to_github(dataframe):
+        try:
+            g = Github(TOKEN)
+            repo = g.get_repo(REPO_NAME)
+            csv_content = dataframe.to_csv(index=False)
+            contents = repo.get_contents(DB_FILE)
+            repo.update_file(contents.path, f"Logistics Sync {datetime.now(IST)}", csv_content, contents.sha)
+            return True
+        except Exception as e:
+            st.error(f"GitHub Error: {e}")
+            return False
 
     if st.form_submit_button("🚀 SUBMIT LOG"):
         if end_km < start_km and end_km != 0:
@@ -87,28 +102,23 @@ with st.form("logistics_form", clear_on_submit=True):
                 "Fuel_Ltrs": fuel_qty, 
                 "Purpose": purpose, 
                 "Location": location.upper(), 
-                "Items": items.upper(), # SAVED AS "Items"
+                "Items": items.upper(),
                 "Photo": img_str
             }])
             
             updated_df = pd.concat([df, new_log], ignore_index=True)
             updated_df.to_csv(DB_FILE, index=False)
-            if save_to_github(updated_df):
-                st.success(f"✅ Logged {trip_distance}km trip by {driver}")
-                st.rerun()
-                # ... (previous saving logic) ...
-            updated_df = pd.concat([df, new_log], ignore_index=True)
-            updated_df.to_csv(DB_FILE, index=False)
             
             if save_to_github(updated_df):
+                st.cache_data.clear() # CLEAR CACHE BEFORE RERUN
                 st.success(f"✅ Logged {trip_distance}km trip by {driver}")
-                # THIS LINE BELOW FORCES THE TABLE TO UPDATE IMMEDIATELY
                 st.rerun()
 
 # --- 4. THE PROFESSIONAL LEDGER GRID ---
 st.divider()
 if not df.empty:
     st.subheader("📜 Recent Movement History")
+    # Sort and take top 15
     view_df = df.sort_values(by="Timestamp", ascending=False).head(15)
     
     grid_html = """
@@ -125,15 +135,14 @@ if not df.empty:
             </tr>
     """
     for _, r in view_df.iterrows():
-        p_stat = "✅ Yes" if len(str(r['Photo'])) > 50 else "❌ No"
+        p_stat = "✅ Yes" if isinstance(r['Photo'], str) and len(r['Photo']) > 50 else "❌ No"
         grid_html += f"<tr>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Timestamp']}</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'><b>{r['Vehicle']}</b></td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Purpose']}</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Location']}</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Distance', 0)} KM</td>"
-        # FIXED: Changed from r['Item_Details'] to r['Items']
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Items']}</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Items', '')}</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{p_stat}</td>"
         grid_html += f"</tr>"
     grid_html += "</table></div>"
@@ -142,6 +151,7 @@ if not df.empty:
     # --- 5. PHOTO SELECTION VIEWER ---
     st.write("---")
     st.subheader("🔍 View Bill / Challan Photo")
+    # Filter for rows that actually have photos
     photo_df = df[df["Photo"].astype(str).str.len() > 50].copy()
     if not photo_df.empty:
         photo_df = photo_df.sort_values(by="Timestamp", ascending=False)
