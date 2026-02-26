@@ -72,7 +72,7 @@ with st.form("logistics_form", clear_on_submit=True):
         location = st.text_input("Location", placeholder="e.g. Unit 2 / Shop Name")
 
     items = st.text_area("Item Details / Remarks")
-    cam_photo = st.camera_input("Capture Bill / Odometer / Loading Photo")
+    cam_photo = st.camera_input("Capture Bill / Odometer Photo")
 
     if st.form_submit_button("🚀 SUBMIT LOG"):
         if end_km < start_km and end_km != 0:
@@ -80,11 +80,15 @@ with st.form("logistics_form", clear_on_submit=True):
         elif not auth_by or not location:
             st.error("❌ Please fill in Authorization and Location.")
         else:
+            # --- OPTIMIZED IMAGE PROCESSING ---
             img_str = ""
             if cam_photo:
                 img = Image.open(cam_photo)
+                # Resize to passport-size thumbnail (max 400px)
+                img.thumbnail((400, 400)) 
                 buf = BytesIO()
-                img.save(buf, format="JPEG", quality=50) 
+                # High compression (quality=40) to stay around 60KB
+                img.save(buf, format="JPEG", quality=40, optimize=True) 
                 img_str = base64.b64encode(buf.getvalue()).decode()
             
             trip_distance = end_km - start_km if end_km > 0 else 0
@@ -140,28 +144,17 @@ if not df.empty:
     grid_html += "</table></div>"
     components.html(grid_html, height=450, scrolling=True)
 
-    # --- 5. PHOTO SELECTION VIEWER (ADDED BACK) ---
+    # --- 5. PHOTO SELECTION VIEWER ---
     st.write("---")
-    st.subheader("🔍 View Bill / Challan Photo")
-    # Filter rows that have a valid base64 image string
+    st.subheader("🔍 View Bill / Odometer Photo")
     photo_df = df[df["Photo"].astype(str).str.len() > 50].copy()
-    
     if not photo_df.empty:
         photo_df = photo_df.sort_values(by="Timestamp", ascending=False)
-        # Create a clean label for the dropdown
         options = {i: f"{r['Timestamp']} | {r['Vehicle']} | {r['Driver']}" for i, r in photo_df.iterrows()}
-        
-        selection = st.selectbox("Select a trip to view its photo:", 
-                                 options.keys(), 
-                                 format_func=lambda x: options[x])
-        
+        selection = st.selectbox("Select trip:", options.keys(), format_func=lambda x: options[x])
         if selection is not None:
-            try:
-                img_data = base64.b64decode(photo_df.loc[selection, "Photo"])
-                st.image(img_data, caption=f"Photo for trip on {photo_df.loc[selection, 'Timestamp']}", use_container_width=True)
-            except Exception as e:
-                st.error("Could not load image.")
-    else:
-        st.info("No photos uploaded yet.")
+            img_data = base64.b64decode(photo_df.loc[selection, "Photo"])
+            # Displayed as a compact 'passport' size in the UI
+            st.image(img_data, width=300, caption="Verified Image")
 else:
     st.info("No movement logs found yet.")
