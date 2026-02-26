@@ -102,6 +102,14 @@ with st.form("logistics_form", clear_on_submit=True):
             if save_to_github(updated_df):
                 st.success(f"✅ Logged {trip_distance}km trip by {driver}")
                 st.rerun()
+                # ... (previous saving logic) ...
+            updated_df = pd.concat([df, new_log], ignore_index=True)
+            updated_df.to_csv(DB_FILE, index=False)
+            
+            if save_to_github(updated_df):
+                st.success(f"✅ Logged {trip_distance}km trip by {driver}")
+                # THIS LINE BELOW FORCES THE TABLE TO UPDATE IMMEDIATELY
+                st.rerun()
 
 # --- 4. THE PROFESSIONAL LEDGER GRID ---
 st.divider()
