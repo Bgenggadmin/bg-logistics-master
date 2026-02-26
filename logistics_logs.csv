@@ -1,2 +1,3 @@
 Timestamp,Vehicle,Driver,Authorized_By,Start_KM,End_KM,Distance,Fuel_Ltrs,Purpose,Location,Items,Photo
 2026-02-26 12:56,Ashok Leyland,Driver,SA,3,8,5,0.3,Inter-Unit (500m),2,TEST,
+2026-02-26 12:57,Ashok Leyland,Other,BR,1,2,1,0.6,Site Delivery,1,TEST,
