@@ -1,5 +1,5 @@
 streamlit
+st-supabase-connection
 pandas
-PyGithub
 pytz
 Pillow
