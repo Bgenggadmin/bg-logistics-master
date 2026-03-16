@@ -117,6 +117,17 @@ with st.form("logistics_form", clear_on_submit=True):
                 st.error(f"Database Error: {e}")
 
 # --- 4. THE PROFESSIONAL LEDGER GRID ---
+# --- OPTIONAL: ANALYTICS CARDS ---
+if not df.empty:
+    st.subheader("📊 Fleet Summary")
+    c1, c2, c3 = st.columns(3)
+    total_km = df['distance'].sum()
+    total_fuel = df['fuel_ltrs'].sum()
+    avg_mileage = total_km / total_fuel if total_fuel > 0 else 0
+    
+    c1.metric("Total Distance", f"{total_km} KM")
+    c2.metric("Total Fuel", f"{total_fuel} L")
+    c3.metric("Avg Mileage", f"{avg_mileage:.2f} KM/L")
 st.divider()
 if not df.empty:
     st.subheader("📜 Recent Movement History (Cloud Sync)")
