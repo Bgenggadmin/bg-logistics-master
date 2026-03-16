@@ -1,36 +1,36 @@
 import streamlit as st
+from st_supabase_connection import SupabaseConnection
 import pandas as pd
 from datetime import datetime
 import pytz
-import os
 import base64
-from github import Github
 from io import BytesIO
 from PIL import Image
 import streamlit.components.v1 as components
 
 # --- 1. SETUP ---
 IST = pytz.timezone('Asia/Kolkata')
-DB_FILE = "logistics_logs.csv"
 
-st.set_page_config(page_title="B&G Logistics", layout="wide")
+st.set_page_config(page_title="B&G Logistics | Supabase", layout="wide")
 
+# Initialize Supabase Connection
 try:
-    REPO_NAME = st.secrets["GITHUB_REPO"]
-    TOKEN = st.secrets["GITHUB_TOKEN"]
-except:
-    st.error("❌ Secrets missing in Streamlit Cloud!")
+    conn = st.connection("supabase", type=SupabaseConnection)
+except Exception as e:
+    st.error("❌ Supabase Connection Failed. Check your Secrets!")
     st.stop()
 
 # --- 2. DATA UTILITIES ---
 @st.cache_data(ttl=1) 
 def load_data():
-    if os.path.exists(DB_FILE):
-        return pd.read_csv(DB_FILE)
+    # Fetch data from Supabase Table
+    res = conn.table("logistics_logs").select("*").execute()
+    if res.data:
+        return pd.DataFrame(res.data)
     return pd.DataFrame(columns=[
-        "Timestamp", "Vehicle", "Driver", "Authorized_By", 
-        "Start_KM", "End_KM", "Distance", "Fuel_Ltrs", 
-        "Purpose", "Location", "Items", "Photo"
+        "timestamp", "vehicle", "driver", "authorized_by", 
+        "start_km", "end_km", "distance", "fuel_ltrs", 
+        "purpose", "location", "items", "photo_path"
     ])
 
 df = load_data()
@@ -40,21 +40,9 @@ if st.sidebar.button("🔄 Refresh Data"):
     st.cache_data.clear()
     st.rerun()
 
-def save_to_github(dataframe):
-    try:
-        g = Github(TOKEN)
-        repo = g.get_repo(REPO_NAME)
-        csv_content = dataframe.to_csv(index=False)
-        contents = repo.get_contents(DB_FILE)
-        repo.update_file(contents.path, f"Logistics Sync {datetime.now(IST)}", csv_content, contents.sha)
-        return True
-    except Exception as e:
-        st.error(f"GitHub Sync Error: {e}")
-        return False
-
 # --- 3. INPUT FORM ---
 with st.form("logistics_form", clear_on_submit=True):
-    st.subheader("📝 Log Vehicle Movement & Fuel")
+    st.subheader("📝 Log Vehicle Movement & Fuel (Supabase Cloud)")
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -80,40 +68,60 @@ with st.form("logistics_form", clear_on_submit=True):
         elif not auth_by or not location:
             st.error("❌ Please fill in Authorization and Location.")
         else:
-            # --- OPTIMIZED IMAGE PROCESSING ---
-            img_str = ""
+            # --- OPTIMIZED IMAGE PROCESSING & STORAGE UPLOAD ---
+            photo_filename = ""
             if cam_photo:
                 img = Image.open(cam_photo)
-                # Resize to passport-size thumbnail (max 400px)
                 img.thumbnail((400, 400)) 
                 buf = BytesIO()
-                # High compression (quality=40) to stay around 60KB
                 img.save(buf, format="JPEG", quality=40, optimize=True) 
-                img_str = base64.b64encode(buf.getvalue()).decode()
-            
+                
+                # Generate unique filename
+                photo_filename = f"log_{datetime.now(IST).strftime('%Y%m%d_%H%M%S')}.jpg"
+                
+                # Upload to Supabase Storage
+                try:
+                    conn.client.storage.from_("logistics-photos").upload(
+                        path=photo_filename,
+                        file=buf.getvalue(),
+                        file_options={"content-type": "image/jpeg"}
+                    )
+                except Exception as e:
+                    st.warning(f"Photo upload failed, but log will continue: {e}")
+
             trip_distance = end_km - start_km if end_km > 0 else 0
 
-            new_log = pd.DataFrame([{
-                "Timestamp": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
-                "Vehicle": vehicle, "Driver": driver, "Authorized_By": auth_by.upper(),
-                "Start_KM": start_km, "End_KM": end_km, "Distance": trip_distance,
-                "Fuel_Ltrs": fuel_qty, "Purpose": purpose, "Location": location.upper(), 
-                "Items": items.upper(), "Photo": img_str
-            }])
+            # Prepare entry for Supabase
+            new_entry = {
+                "timestamp": datetime.now(IST).strftime('%Y-%m-%d %H:%M'),
+                "vehicle": vehicle, 
+                "driver": driver, 
+                "authorized_by": auth_by.upper(),
+                "start_km": start_km, 
+                "end_km": end_km, 
+                "distance": trip_distance,
+                "fuel_ltrs": fuel_qty, 
+                "purpose": purpose, 
+                "location": location.upper(), 
+                "items": items.upper(), 
+                "photo_path": photo_filename # Link to storage
+            }
             
-            updated_df = pd.concat([df, new_log], ignore_index=True)
-            updated_df.to_csv(DB_FILE, index=False)
-            
-            if save_to_github(updated_df):
+            # --- INSERT INTO SUPABASE ---
+            try:
+                conn.table("logistics_logs").insert(new_entry).execute()
                 st.cache_data.clear() 
                 st.success(f"✅ Logged {trip_distance}km trip by {driver}")
                 st.rerun()
+            except Exception as e:
+                st.error(f"Database Error: {e}")
 
 # --- 4. THE PROFESSIONAL LEDGER GRID ---
 st.divider()
 if not df.empty:
-    st.subheader("📜 Recent Movement History")
-    view_df = df.sort_values(by="Timestamp", ascending=False).head(15)
+    st.subheader("📜 Recent Movement History (Cloud Sync)")
+    # Normalize column names for display if Supabase changed casing
+    view_df = df.sort_values(by="timestamp", ascending=False).head(15)
     
     grid_html = """
     <div style="overflow-x: auto; border: 1px solid #000;">
@@ -130,15 +138,16 @@ if not df.empty:
             </tr>
     """
     for _, r in view_df.iterrows():
-        p_stat = "✅ Yes" if isinstance(r['Photo'], str) and len(r['Photo']) > 50 else "❌ No"
+        # Check if photo_path exists in storage link
+        p_stat = "✅ Yes" if str(r.get('photo_path', '')) != "" else "❌ No"
         grid_html += f"<tr>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['Timestamp']}</td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'><b>{r['Vehicle']}</b></td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Driver', 'N/A')}</td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Authorized_By', 'N/A')}</td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Fuel_Ltrs', 0)} L</td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Distance', 0)} KM</td>"
-        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('Items', '')}</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r['timestamp']}</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'><b>{r['vehicle']}</b></td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('driver', 'N/A')}</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('authorized_by', 'N/A')}</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('fuel_ltrs', 0)} L</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('distance', 0)} KM</td>"
+        grid_html += f"<td style='border:1px solid #000; padding:8px;'>{r.get('items', '')}</td>"
         grid_html += f"<td style='border:1px solid #000; padding:8px;'>{p_stat}</td>"
         grid_html += f"</tr>"
     grid_html += "</table></div>"
@@ -147,14 +156,16 @@ if not df.empty:
     # --- 5. PHOTO SELECTION VIEWER ---
     st.write("---")
     st.subheader("🔍 View Bill / Odometer Photo")
-    photo_df = df[df["Photo"].astype(str).str.len() > 50].copy()
+    photo_df = df[df["photo_path"].astype(str).str.len() > 2].copy()
     if not photo_df.empty:
-        photo_df = photo_df.sort_values(by="Timestamp", ascending=False)
-        options = {i: f"{r['Timestamp']} | {r['Vehicle']} | {r['Driver']}" for i, r in photo_df.iterrows()}
+        photo_df = photo_df.sort_values(by="timestamp", ascending=False)
+        options = {i: f"{r['timestamp']} | {r['vehicle']} | {r['driver']}" for i, r in photo_df.iterrows()}
         selection = st.selectbox("Select trip:", options.keys(), format_func=lambda x: options[x])
+        
         if selection is not None:
-            img_data = base64.b64decode(photo_df.loc[selection, "Photo"])
-            # Displayed as a compact 'passport' size in the UI
-            st.image(img_data, width=300, caption="Verified Image")
+            file_path = photo_df.loc[selection, "photo_path"]
+            # Generate Public URL from Supabase Storage
+            img_url = conn.client.storage.from_("logistics-photos").get_public_url(file_path)
+            st.image(img_url, width=400, caption=f"Verified Image: {file_path}")
 else:
     st.info("No movement logs found yet.")
